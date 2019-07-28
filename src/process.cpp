@@ -16,7 +16,7 @@ int Process::Pid() { return _pid; }
 
 // DONE: Return this process's CPU utilization
 float Process::CpuUtilization() { 
-    return LinuxParser::CpuUtilization(_pid); 
+    return LinuxParser::ActiveJiffies(_pid); 
 }
 
 // DONE: Return the command that generated this process

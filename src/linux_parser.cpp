@@ -70,41 +70,58 @@ vector<int> LinuxParser::Pids() {
 // DONE: Read and return the system memory utilization
 float LinuxParser::MemoryUtilization() { 
   string line;
-  string name1 = "MemAvailable:";
+  string name1 = "MemTotal:";
   string name2 = "MemFree:";
   string name3 = "Buffers:";
+  string name4 = "Cached:";
   string value;
   float result;
 
   std::ifstream stream(kProcDirectory + kMeminfoFilename);
   float total_mem = 0;
   float free_mem = 0;
-  float buffers = 0;    
+  float buffers = 0;   
+  float cached  = 0; 
+  bool done = false;
+  int count = 0;
   if (stream.is_open()) {
     while(std::getline(stream, line)){
-        if (total_mem != 0 && free_mem != 0)
+        if (done)
             break;
         if (line.compare(0, name1.size(), name1) == 0) {
             std::istringstream buf(line);
             std::istream_iterator<string> beg(buf), end;
             vector<string> values(beg, end);
             total_mem = stof(values[1]);
+            count +=1;
         }
         if (line.compare(0, name2.size(), name2) == 0) {
             std::istringstream buf(line);
             std::istream_iterator<string> beg(buf), end;
             vector<string> values(beg, end);
             free_mem = stof(values[1]);
+            count +=1;
         }
         if (line.compare(0, name3.size(), name3) == 0) {
             std::istringstream buf(line);
             std::istream_iterator<string> beg(buf), end;
             vector<string> values(beg, end);
             buffers = stof(values[1]);
+            count +=1;
+        }
+        if (line.compare(0, name4.size(), name4) == 0) {
+            std::istringstream buf(line);
+            std::istream_iterator<string> beg(buf), end;
+            vector<string> values(beg, end);
+            cached = stof(values[1]);
+            count +=1;
+        }
+        if(count >=  4){
+          done=true;
         }
     }
   }
-  result  = float((1-(free_mem/(total_mem-buffers))));
+  result  = float((total_mem-free_mem-buffers-cached)/total_mem);
   return result;
 }
 
@@ -120,12 +137,40 @@ long LinuxParser::UpTime() {
   return stoi(uptime_str);
 }
 
-// TODO: Read and return the number of jiffies for the system
-long LinuxParser::Jiffies() { return 0; }
+// DONE: Read and return the number of jiffies for the system
+long LinuxParser::Jiffies() { 
+  std::vector<std::string> values = LinuxParser::CpuUtilization();
+  float activeTime = LinuxParser::ActiveJiffies(values);
+  float idleTime = LinuxParser::IdleJiffies(values);  
+  return activeTime+idleTime; 
+}
 
-// TODO: Read and return the number of active jiffies for a PID
-// REMOVE: [[maybe_unused]] once you define the function
-long LinuxParser::ActiveJiffies(int pid[[maybe_unused]]) { return 0; }
+// DONE: Read and return the number of active jiffies for a PID
+long LinuxParser::ActiveJiffies(int pid) { 
+  string line,value;
+  float result;
+  std::ifstream stream(kProcDirectory + to_string(pid)  + "/"+ kStatFilename);
+  if (stream.is_open()) {
+    std::getline(stream, line);
+    string str = line;
+    std::istringstream buf(str);
+    std::istream_iterator<string> beg(buf), end;
+    vector<string> values(beg, end); 
+
+    float utime = stof(values[13]);
+    float stime = stof(values[14]);
+    float cutime = stof(values[15]);
+    float cstime = stof(values[16]);
+    float starttime = stof(values[21]);
+    float uptime = LinuxParser::UpTime();
+    float freq = sysconf(_SC_CLK_TCK);
+
+    float total_time = utime + stime + cutime + cstime;
+    float seconds = uptime - (starttime/freq);
+    result = ((total_time/freq)/seconds);
+  }
+  return result;  
+}
 
 // DONE: Read and return the number of active jiffies for the system
 long LinuxParser::ActiveJiffies(std::vector<std::string> values) { 
@@ -172,11 +217,13 @@ int LinuxParser::TotalProcesses() {
   int result=0;
   if (stream.is_open()) {
     while (std::getline(stream, line)) {
-      std::istringstream buf(line);
-      std::istream_iterator<string> beg(buf), end;
-      vector<string> values(beg, end);
-      result += stoi(values[1]);
-      break;     
+      if (line.compare(0, name.size(),name) == 0) {
+        std::istringstream buf(line);
+        std::istream_iterator<string> beg(buf), end;
+        vector<string> values(beg, end);
+        result += stoi(values[1]);
+        break;
+      }
     }
   }
   return result;
@@ -190,11 +237,13 @@ int LinuxParser::RunningProcesses() {
   int result=0;
   if (stream.is_open()) {
     while (std::getline(stream, line)) {
-      std::istringstream buf(line);
-      std::istream_iterator<string> beg(buf), end;
-      vector<string> values(beg, end);
-      result += stoi(values[1]);
-      break;     
+      if (line.compare(0, name.size(),name) == 0) {
+        std::istringstream buf(line);
+        std::istream_iterator<string> beg(buf), end;
+        vector<string> values(beg, end);
+        result += stoi(values[1]);
+        break;
+      }
     }
   }
   return result; 
@@ -211,9 +260,9 @@ string LinuxParser::Command(int pid) {
 //DONE:Read and return the memory used by a process
 string LinuxParser::Ram(int pid) { 
   string line;
-  string name = "VmData";
+  string name = "VmSize";
   string value;
-  float result;
+  double result;
   std::ifstream stream(kProcDirectory + to_string(pid)  + kStatusFilename);
   if (stream.is_open()) {
     while(std::getline(stream, line)){
@@ -221,41 +270,12 @@ string LinuxParser::Ram(int pid) {
             std::istringstream buf(line);
             std::istream_iterator<string> beg(buf), end;
             vector<string> values(beg, end);
-            result = (stof(values[1])/float(1024*1024));
+            result = (stof(values[1])/double(1024));
             break;
         }
     }
   }
-  return to_string(result);
-}
-
-
-// DONE: CPU Utilz
-float LinuxParser::CpuUtilization(int pid) { 
-  string line,value;
-  float result;
-  std::ifstream stream(kProcDirectory + to_string(pid)  + "/"+ kStatFilename);
-  if (stream.is_open()) {
-    std::getline(stream, line);
-    string str = line;
-    std::istringstream buf(str);
-    std::istream_iterator<string> beg(buf), end;
-    vector<string> values(beg, end); 
-
-    float utime = LinuxParser::UpTime(pid);
-    float stime = stof(values[14]);
-    float cutime = stof(values[15]);
-    float cstime = stof(values[16]);
-    float starttime = stof(values[21]);
-    float uptime = LinuxParser::UpTime();
-    float freq = sysconf(_SC_CLK_TCK);
-
-    float total_time = utime + stime + cutime + cstime;
-    float seconds = uptime - (starttime/freq);
-    result = 100.0*((total_time/freq)/seconds);
-    result =  long(stof(values[13])/sysconf(_SC_CLK_TCK));
-  }
-  return result;  
+  return to_string(result).substr(0,7);
 }
 
 

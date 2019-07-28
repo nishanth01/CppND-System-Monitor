@@ -19,6 +19,6 @@ float Processor::Utilization() {
     float  activeTime  = activeTime2 - activeTime1;
     float  idleTime  = idleTime2 - idleTime1;
     float  totalTime = activeTime + idleTime;
-    float  result = 100.0*(activeTime / totalTime);
+    float  result = (activeTime / totalTime);
     return result;
 }
